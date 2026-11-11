@@ -1,4 +1,4 @@
-# ফ্রি ব্রাউজার (FreeBrowser) v4
+# Open Browser v5
 
 VPN অ্যাপ ছাড়া ব্লক সাইট খোলার ব্রাউজার। ভেতরে তিন স্তর আছে:
 
@@ -19,6 +19,11 @@ KEY আগে থেকেই `relay/worker.js`, `relay/vps-server.js` আর �
 
 সীমা: ফ্রি প্ল্যানে দিনে ১ লাখ রিকোয়েস্ট। Cloudflare-এর পেছনে থাকা সাইট Worker দিয়ে খোলে না। Cloudflare প্রক্সি-ধরনের ব্যবহারে অ্যাকাউন্ট বন্ধও করতে পারে।
 
+### অপশন ক-২: Deploy বাটন (কপি-পেস্ট ছাড়া)
+GitHub repo public করে এই লিংক খুলুন (USERNAME বদলে নিন):
+`https://deploy.workers.cloudflare.com/?url=https://github.com/USERNAME/openbrowser/tree/main/relay`
+Cloudflare নিজে Worker বানিয়ে লিংক দেবে।
+
 ### অপশন খ: নিজের VPS (সবচেয়ে নির্ভরযোগ্য)
 বিদেশি যেকোনো VPS (মাসে ~$4-5), Node.js সহ:
 ```
@@ -35,3 +40,6 @@ KEY=23228a446f85b394e78f2ed9f8bf0864 PORT=8080 node relay/vps-server.js
 
 ইচ্ছা হলে বিল্ডের আগে `app/src/main/java/com/freebrowser/app/RelayDefaults.kt`-এ `URL` বসিয়ে দিন, তাহলে APK ইনস্টল করেই রিলে চালু থাকবে।
 (সতর্কতা: APK যার হাতে যাবে সে-ই আপনার রিলে ব্যবহার করতে পারবে।)
+
+## সমস্যা হলে (টেস্ট স্ক্রিন)
+অ্যাড্রেস বারে `about:diag` লিখে Go চাপুন (বা `about:diag example.com`)। প্রায় ১-২ মিনিটে একটা রিপোর্ট আসবে: DNS ঠিক আছে কিনা, IP-তে কানেক্ট হচ্ছে কিনা, কোন বাইপাস পদ্ধতি কাজ করছে, আর রিলে কাজ করছে কিনা। রিপোর্টের স্ক্রিনশট পাঠালে ঠিক কোথায় আটকাচ্ছে বোঝা যাবে।

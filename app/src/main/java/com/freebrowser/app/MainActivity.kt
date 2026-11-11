@@ -61,7 +61,9 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.OutputStream
 import java.net.HttpURLConnection
+import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.Socket
 import java.net.URL
 import java.net.URLConnection
 import java.net.URLEncoder
@@ -885,6 +887,11 @@ class MainActivity : Activity() {
             askRelay()
             return
         }
+        if (s.startsWith("about:diag")) { // hidden self-test: shows which bypass method works for a site
+            urlBar.clearFocus()
+            runDiag(s.removePrefix("about:diag").trim())
+            return
+        }
         if (tabs.isEmpty()) return
         val u = toUrl(s)
         if (u == null) loadHome(current) else web.loadUrl(u)
@@ -989,6 +996,96 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("বাতিল", null)
             .show()
+    }
+
+    // ------------------------------------------------------------------ hidden self-test ("about:diag" or "about:diag example.com")
+
+    private fun runDiag(host0: String) {
+        val host = host0.ifBlank { "www.pornhub.com" }
+        toast("টেস্ট চলছে, ১-২ মিনিট অপেক্ষা করুন")
+        val sb = StringBuilder()
+        val savedMode = Config.mode
+        val savedRelay = Config.relayUrl
+        val savedAlways = Config.relayAlways
+        val port = proxyPort
+        Thread {
+            fun show() {
+                val html = "<html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head>" +
+                        "<body style=\"font-family:monospace;font-size:13px;padding:14px;white-space:pre-wrap;word-break:break-all\">" +
+                        esc(sb.toString()) + "</body></html>"
+                runOnUiThread {
+                    if (tabs.isNotEmpty()) web.loadDataWithBaseURL("about:diag", html, "text/html", "UTF-8", null)
+                }
+            }
+
+            fun add(line: String) {
+                sb.append(line).append('\n')
+                show()
+            }
+
+            fun fetch(): String {
+                val t0 = System.currentTimeMillis()
+                return try {
+                    val p = java.net.Proxy(java.net.Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", port))
+                    val c = URL("https://$host/").openConnection(p) as HttpURLConnection
+                    c.connectTimeout = 9000
+                    c.readTimeout = 9000
+                    c.instanceFollowRedirects = false
+                    c.setRequestProperty("User-Agent", defaultUa)
+                    val code = c.responseCode
+                    c.disconnect()
+                    "OK HTTP $code (" + (System.currentTimeMillis() - t0) + " ms)"
+                } catch (e: Exception) {
+                    "FAIL " + e.javaClass.simpleName + ": " + e.message + " (" + (System.currentTimeMillis() - t0) + " ms)"
+                }
+            }
+
+            try {
+                add("Host: $host")
+                add("Relay: " + (savedRelay ?: "NOT SET"))
+                val ips = try {
+                    Doh.resolve(host)
+                } catch (e: Exception) {
+                    emptyList()
+                }
+                add("DoH IPs: " + ips.joinToString { it.hostAddress ?: "?" })
+                val sysIps = try {
+                    InetAddress.getAllByName(host).joinToString { it.hostAddress ?: "?" }
+                } catch (e: Exception) {
+                    "FAIL " + e.javaClass.simpleName
+                }
+                add("System DNS IPs: $sysIps")
+                for (ip in ips.take(2)) {
+                    val t0 = System.currentTimeMillis()
+                    val r = try {
+                        Socket().use { sk -> sk.connect(InetSocketAddress(ip, 443), 5000) }
+                        "connected (" + (System.currentTimeMillis() - t0) + " ms)"
+                    } catch (e: Exception) {
+                        "FAIL " + e.javaClass.simpleName
+                    }
+                    add("TCP " + ip.hostAddress + ":443 -> " + r)
+                }
+                Config.relayUrl = null
+                val tests = listOf("plain" to 0, "split" to 1, "record-split" to 2, "split+case" to 4, "record+case" to 5)
+                for ((label, m) in tests) {
+                    Config.mode = m
+                    add("[$label] " + fetch())
+                }
+                Config.relayUrl = savedRelay
+                if (savedRelay != null) {
+                    Config.mode = 3
+                    Config.relayAlways = true
+                    add("[relay] " + fetch())
+                } else {
+                    add("[relay] SKIPPED (relay not set)")
+                }
+            } finally {
+                Config.mode = savedMode
+                Config.relayUrl = savedRelay
+                Config.relayAlways = savedAlways
+                add("--- done ---")
+            }
+        }.start()
     }
 
     // ------------------------------------------------------------------ downloads (go through the same bypass proxy)
@@ -1232,7 +1329,7 @@ input{width:100%;box-sizing:border-box;padding:15px 20px;font-size:16px;border:n
 .g a{display:block;color:#202124;text-decoration:none;font-size:12px;word-break:break-word}
 .i{display:block;width:54px;height:54px;line-height:54px;margin:0 auto 8px;border-radius:50%;background:#e8f0fe;color:#1a73e8;font-size:22px;font-weight:bold}
 </style></head><body>
-<h1>ফ্রি ব্রাউজার</h1>
+<h1>Open Browser</h1>
 <form action="https://www.google.com/search" method="get"><input name="q" placeholder="সার্চ করুন" autocomplete="off"></form>
 <div class="g">%TILES%</div>
 </body></html>"""

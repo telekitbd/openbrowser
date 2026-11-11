@@ -28,6 +28,9 @@ class LocalProxy {
     /** host -> working mode (0,1,2) or -1 when only the upstream proxy worked */
     private val hostMode = ConcurrentHashMap<String, Int>()
 
+    /** 1 = TCP split, 2 = TLS record split, 4 = TCP split + mixed-case SNI, 5 = record split + mixed-case SNI, 0 = plain */
+    private val AUTO_MODES = listOf(1, 2, 4, 5, 0)
+
     @Volatile
     private var server: ServerSocket? = null
 
@@ -243,12 +246,11 @@ class LocalProxy {
         }
 
         val waitReply = Config.mode == 3 || fallback
+        val cm = Config.mode
         var modes: List<Int> = when {
-            Config.mode == 0 -> listOf(0)
-            Config.mode == 1 -> listOf(1)
-            Config.mode == 2 -> listOf(2)
-            remembered != null && remembered >= 0 -> listOf(remembered) + listOf(1, 2, 0).filter { it != remembered }
-            else -> listOf(1, 2, 0)
+            cm in 0..2 || cm in 4..5 -> listOf(cm)
+            remembered != null && remembered >= 0 -> listOf(remembered) + AUTO_MODES.filter { it != remembered }
+            else -> AUTO_MODES
         }
         if (fallback && Config.mode == 3) modes = modes.take(1) // the relay is the safety net, don't waste time
 
@@ -367,19 +369,34 @@ class LocalProxy {
 
     // ---------------------------------------------------------------- TLS ClientHello splitting
 
-    private fun sendFragmented(out: OutputStream, hdr: ByteArray, payload: ByteArray, mode: Int) {
-        if (payload.size < 2) {
+    private fun sendFragmented(out: OutputStream, hdr: ByteArray, payload0: ByteArray, mode: Int) {
+        if (payload0.size < 2) {
             out.write(hdr)
-            out.write(payload)
+            out.write(payload0)
             out.flush()
             return
         }
-        val sni = findSni(payload)
+        val style = when (mode) {
+            4 -> 1
+            5 -> 2
+            else -> mode
+        }
+        val sni = findSni(payload0)
+        var payload = payload0
+        if (mode >= 4 && sni != null) {
+            // SNI is case-insensitive: "WwW.pOrNhUb.CoM" is valid but trips naive filters
+            payload = payload0.copyOf()
+            for (i in 0 until sni[1]) {
+                val idx = sni[0] + i
+                val c = payload[idx].toInt()
+                if (i % 2 == 0 && c in 97..122) payload[idx] = (c - 32).toByte()
+            }
+        }
         var sp = if (sni != null) sni[0] + maxOf(1, sni[1] / 2) else minOf(10, payload.size / 2)
         if (sp < 1) sp = 1
         if (sp >= payload.size) sp = payload.size - 1
 
-        if (mode == 2) {
+        if (style == 2) {
             // two TLS records, each sent in its own TCP segment
             out.write(record(hdr, payload, 0, sp))
             out.flush()
