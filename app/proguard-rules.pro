@@ -1,1 +1,5 @@
-# Nothing special needed: no reflection, only androidx.webkit (ships its own consumer rules).
+# OkHttp optional platforms
+-dontwarn okhttp3.internal.platform.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**

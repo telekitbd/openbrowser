@@ -163,7 +163,7 @@ class LocalProxy {
             try {
                 val s = Socket()
                 s.tcpNoDelay = true
-                s.connect(InetSocketAddress(addr, port), 8000)
+                s.connect(InetSocketAddress(addr, port), if (hasFallback()) 4000 else 8000)
                 s.soTimeout = 300_000
                 return s
             } catch (_: Exception) {
@@ -172,36 +172,85 @@ class LocalProxy {
         return null
     }
 
-    private fun openAny(host: String, port: Int): Socket? = open(host, port) ?: openUpstream(host, port)
+    private fun hasFallback(): Boolean = Config.relayUrl != null || Config.upstreamHost != null
+
+    private fun relayOpen(host: String, port: Int): Socket? =
+        if (Config.relayUrl != null) WsSocket.open(host, port) else null
+
+    /** Relay first, then the user's upstream proxy. */
+    private fun fallbackOpen(host: String, port: Int): Socket? =
+        relayOpen(host, port) ?: openUpstream(host, port)
+
+    private fun openAny(host: String, port: Int): Socket? {
+        if (Config.relayAlways && Config.relayUrl != null) {
+            val r = relayOpen(host, port)
+            if (r != null) return r
+        }
+        return open(host, port) ?: fallbackOpen(host, port)
+    }
+
+    /** "m.example.com" -> "example.com" (good enough to remember which sites need the relay). */
+    private fun baseKey(host: String): String {
+        val h = host.lowercase()
+        val p = h.split('.')
+        return if (p.size <= 2) h else p.takeLast(2).joinToString(".")
+    }
+
+    private fun sendRaw(s: Socket, hdr: ByteArray, payload: ByteArray): Boolean {
+        return try {
+            val out = s.getOutputStream()
+            out.write(hdr)
+            out.write(payload)
+            out.flush()
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     /**
-     * TLS connection with ClientHello splitting. In auto mode every style is tried until the server
-     * answers with a real TLS record; the working style is remembered per host.
+     * TLS connection. Order:
+     *  1. relay-always mode -> relay
+     *  2. site known to need the relay -> relay / upstream
+     *  3. direct with ClientHello splitting (auto mode tries several styles, remembers the one that works)
+     *  4. direct failed -> relay / upstream (and remember that)
      */
     private fun connectTls(host: String, port: Int, hdr: ByteArray, payload: ByteArray, cout: OutputStream): Socket? {
-        val key = host.lowercase()
-        val auto = Config.mode == 3
+        val key = baseKey(host)
         val remembered = hostMode[key]
-        val hasUpstream = Config.upstreamHost != null
+        val fallback = hasFallback()
 
-        if (remembered == -1 && hasUpstream) {
-            val u = openUpstream(host, port)
-            if (u != null) {
-                u.getOutputStream().write(hdr)
-                u.getOutputStream().write(payload)
-                u.getOutputStream().flush()
-                return u
+        fun viaFallback(): Socket? {
+            val u = fallbackOpen(host, port) ?: return null
+            if (!sendRaw(u, hdr, payload)) {
+                closeQuiet(u)
+                return null
+            }
+            hostMode[key] = -1
+            return u
+        }
+
+        if (Config.relayAlways && Config.relayUrl != null) {
+            val r = relayOpen(host, port)
+            if (r != null) {
+                if (sendRaw(r, hdr, payload)) return r
+                closeQuiet(r)
             }
         }
-
-        val modes: List<Int> = when (Config.mode) {
-            0 -> listOf(0)
-            1 -> listOf(1)
-            2 -> listOf(2)
-            else -> if (remembered != null && remembered >= 0) {
-                listOf(remembered) + listOf(1, 2, 0).filter { it != remembered }
-            } else listOf(1, 2, 0)
+        if (fallback && remembered == -1) {
+            val u = viaFallback()
+            if (u != null) return u
         }
+
+        val waitReply = Config.mode == 3 || fallback
+        var modes: List<Int> = when {
+            Config.mode == 0 -> listOf(0)
+            Config.mode == 1 -> listOf(1)
+            Config.mode == 2 -> listOf(2)
+            remembered != null && remembered >= 0 -> listOf(remembered) + listOf(1, 2, 0).filter { it != remembered }
+            else -> listOf(1, 2, 0)
+        }
+        if (fallback && Config.mode == 3) modes = modes.take(1) // the relay is the safety net, don't waste time
 
         for (m in modes) {
             val s = open(host, port) ?: break // no route at all (DNS/connect failed) - splitting can't help
@@ -214,9 +263,9 @@ class LocalProxy {
                 } else {
                     sendFragmented(out, hdr, payload, m)
                 }
-                if (!auto) return s
+                if (!waitReply) return s
 
-                s.soTimeout = 6000
+                s.soTimeout = if (fallback) 4000 else 6000
                 val buf = ByteArray(16384)
                 val n = s.getInputStream().read(buf)
                 if (n > 0 && (buf[0].toInt() == 0x16 || buf[0].toInt() == 0x15)) {
@@ -231,22 +280,7 @@ class LocalProxy {
             closeQuiet(s)
         }
 
-        // everything direct failed: try upstream proxy if the user configured one
-        if (hasUpstream) {
-            val u = openUpstream(host, port)
-            if (u != null) {
-                try {
-                    u.getOutputStream().write(hdr)
-                    u.getOutputStream().write(payload)
-                    u.getOutputStream().flush()
-                    hostMode[key] = -1
-                    return u
-                } catch (_: Exception) {
-                    closeQuiet(u)
-                }
-            }
-        }
-        return null
+        return if (fallback) viaFallback() else null
     }
 
     /** Connects through the user's upstream proxy (HTTP CONNECT or SOCKS5, no auth). */

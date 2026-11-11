@@ -37,6 +37,7 @@ import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.ArrayAdapter
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -97,6 +98,7 @@ class MainActivity : Activity() {
         Config.mode = prefs.getInt("mode2", 3)
         Config.adBlock = prefs.getBoolean("adblock", true)
         parseUpstream(prefs.getString("upstream", "") ?: "")
+        applyRelay()
 
         window.statusBarColor = Color.WHITE
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
@@ -531,7 +533,7 @@ class MainActivity : Activity() {
                 "<p style=\"word-break:break-all;color:#777\">" + esc(url) + "</p>" +
                 "<p><a href=\"" + esc(url) + "\">আবার চেষ্টা করুন</a></p>" +
                 "<p style=\"color:#777;font-size:14px\">সাইট না খুললে মেনু → বাইপাস মোড \"অটো\" করুন, " +
-                "অথবা মেনু → আপস্ট্রিম প্রক্সি দিন।</p>" +
+                "অথবা মেনু → রিলে সেটিংস দিন।</p>" +
                 "</body></html>"
         view.loadDataWithBaseURL("about:error", html, "text/html", "UTF-8", null)
     }
@@ -573,6 +575,7 @@ class MainActivity : Activity() {
             isChecked = Config.adBlock
         }
         m.add(0, 8, 7, "বাইপাস মোড")
+        m.add(0, 13, 8, "রিলে সেটিংস (VPN ছাড়া)")
         m.add(0, 9, 8, "আপস্ট্রিম প্রক্সি")
         m.add(0, 10, 9, "লিংক কপি করুন")
         m.add(0, 11, 10, "শেয়ার করুন")
@@ -588,6 +591,7 @@ class MainActivity : Activity() {
                 7 -> toggleAdBlock()
                 8 -> chooseMode()
                 9 -> askUpstream()
+                13 -> askRelay()
                 10 -> copyLink()
                 11 -> shareLink()
                 12 -> clearData()
@@ -724,6 +728,61 @@ class MainActivity : Activity() {
         Config.upstreamPort = p
         Config.upstreamType = type
         Config.upstreamHost = v.substring(0, c)
+    }
+
+    private fun applyRelay() {
+        var u = (prefs.getString("relayUrl", RelayDefaults.URL) ?: "").trim()
+        if (u.isNotEmpty()) {
+            u = when {
+                u.startsWith("wss://", true) -> "https://" + u.substring(6)
+                u.startsWith("ws://", true) -> "http://" + u.substring(5)
+                u.startsWith("http", true) -> u
+                else -> "https://$u"
+            }
+        }
+        Config.relayUrl = if (u.isEmpty()) null else u
+        Config.relayKey = prefs.getString("relayKey", RelayDefaults.KEY) ?: ""
+        Config.relayAlways = prefs.getBoolean("relayAlways", false)
+    }
+
+    private fun askRelay() {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+        }
+        val urlEt = EditText(this).apply {
+            hint = "রিলে লিংক (যেমন https://xxx.workers.dev)"
+            setSingleLine(true)
+            setText(prefs.getString("relayUrl", RelayDefaults.URL) ?: "")
+        }
+        val keyEt = EditText(this).apply {
+            hint = "KEY (পাসওয়ার্ড)"
+            setSingleLine(true)
+            setText(prefs.getString("relayKey", RelayDefaults.KEY) ?: "")
+        }
+        val always = CheckBox(this).apply {
+            text = "সব সাইট রিলে দিয়ে খুলুন (বেশি নিশ্চিত, একটু ধীর)"
+            isChecked = prefs.getBoolean("relayAlways", false)
+        }
+        box.addView(urlEt)
+        box.addView(keyEt)
+        box.addView(always)
+        AlertDialog.Builder(this)
+            .setTitle("রিলে (VPN ছাড়া)")
+            .setMessage("ব্লক সাইট সরাসরি না খুললে ব্রাউজার নিজেই এই রিলে দিয়ে খুলবে। রিলে বানানোর নিয়ম README-তে আছে।")
+            .setView(box)
+            .setPositiveButton("সেভ") { _, _ ->
+                prefs.edit()
+                    .putString("relayUrl", urlEt.text.toString().trim())
+                    .putString("relayKey", keyEt.text.toString().trim())
+                    .putBoolean("relayAlways", always.isChecked)
+                    .apply()
+                applyRelay()
+                Toast.makeText(this, if (Config.relayUrl != null) "রিলে সেট হয়েছে" else "রিলে বন্ধ", Toast.LENGTH_SHORT).show()
+                if (tabs.isNotEmpty()) web.reload()
+            }
+            .setNegativeButton("বাতিল", null)
+            .show()
     }
 
     private fun copyLink() {

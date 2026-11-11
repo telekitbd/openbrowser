@@ -25,6 +25,17 @@ object Config {
 
     @Volatile
     var upstreamType = 0
+
+    /** Relay (Cloudflare Worker or own VPS) reached over WebSocket. Works for IP-blocked sites too. */
+    @Volatile
+    var relayUrl: String? = null
+
+    @Volatile
+    var relayKey = ""
+
+    /** true = every site goes through the relay, false = only when direct connection fails */
+    @Volatile
+    var relayAlways = false
 }
 
 /** Minimal DNS-over-HTTPS resolver (JSON API). Talks to the DoH servers by IP, so ISP DNS is never used. */
