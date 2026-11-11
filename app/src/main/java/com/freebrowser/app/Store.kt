@@ -64,6 +64,40 @@ class Store(ctx: Context) {
     fun clearHistory() {
         sp.edit().remove("hist").apply()
     }
+
+    // ---- finished downloads
+    data class DlRec(val name: String, val uri: String, val mime: String, val size: Long)
+
+    fun downloads(): MutableList<DlRec> {
+        val out = ArrayList<DlRec>()
+        try {
+            val a = JSONArray(sp.getString("dl", "[]"))
+            for (i in 0 until a.length()) {
+                val o = a.getJSONObject(i)
+                out.add(DlRec(o.optString("n"), o.getString("u"), o.optString("m"), o.optLong("s")))
+            }
+        } catch (_: Exception) {
+        }
+        return out
+    }
+
+    private fun saveDownloads(list: List<DlRec>) {
+        val a = JSONArray()
+        for (x in list) a.put(JSONObject().put("n", x.name).put("u", x.uri).put("m", x.mime).put("s", x.size))
+        sp.edit().putString("dl", a.toString()).apply()
+    }
+
+    fun addDownload(r: DlRec) {
+        val l = downloads()
+        l.add(0, r)
+        saveDownloads(l)
+    }
+
+    fun removeDownload(uri: String) {
+        val l = downloads()
+        l.removeAll { it.uri == uri }
+        saveDownloads(l)
+    }
 }
 
 /** Very small domain based ad / popup network blocklist. */

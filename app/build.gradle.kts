@@ -11,8 +11,8 @@ android {
         applicationId = "com.freebrowser.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 3
-        versionName = "3.0"
+        versionCode = 4
+        versionName = "4.0"
     }
 
     signingConfigs {
@@ -52,4 +52,5 @@ android {
 dependencies {
     implementation("androidx.webkit:webkit:1.11.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("androidx.core:core:1.13.1")
 }
